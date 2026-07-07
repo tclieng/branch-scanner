@@ -6,6 +6,7 @@ import { CATEGORIES } from './types';
 import * as db from './database';
 import { scanReceipt, initializeOCR } from './ocr';
 import { exportReceipts, downloadExcel, shareToWhatsApp, HQ_WHATSAPP } from './excel';
+import { compressImage, estimateSize } from './imageUtil';
 
 // ── State ──────────────────────────────────────────────────
 let currentImageDataUrl: string = '';
@@ -288,15 +289,23 @@ async function handleFormSubmit(e: Event) {
   saveBtn.textContent = '💾 Saving...';
 
   try {
+    // Compress image before save to avoid Android WebView IndexedDB quota
+    if (receipt.imageData && receipt.imageData.startsWith('data:image')) {
+      const before = estimateSize(receipt.imageData);
+      receipt.imageData = await compressImage(receipt.imageData, 1024, 0.7);
+      const after = estimateSize(receipt.imageData);
+      console.log(`[Image] compressed ${before} → ${after}`);
+    }
     await db.addReceipt(receipt);
     showToast('Receipt saved successfully!', 'success');
     resetScan();
     await refreshReceiptList();
     await updateStats();
     showView('list');
-  } catch (err) {
+  } catch (err: any) {
     console.error('[Save Error]', err);
-    showToast('Failed to save. Please try again.', 'error');
+    const msg = err?.message || err?.name || 'Unknown error';
+    showToast(`❌ Save failed: ${msg}`, 'error', 5000);
   } finally {
     saveBtn.disabled = false;
     saveBtn.textContent = '💾 Save Receipt';
@@ -470,14 +479,14 @@ function hideConfirmDialog() {
 
 // ── Toast ───────────────────────────────────────────────────
 let toastTimer: ReturnType<typeof setTimeout>;
-function showToast(message: string, type: 'success' | 'error' = 'success') {
+function showToast(message: string, type: 'success' | 'error' = 'success', durationMs = 3000) {
   const toast = document.getElementById('toast')!;
   toast.textContent = message;
   toast.className = `toast ${type} show`;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => {
     toast.classList.remove('show');
-  }, 3000);
+  }, durationMs);
 }
 
 // ── Utilities ───────────────────────────────────────────────
