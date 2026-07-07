@@ -170,28 +170,29 @@
     <!-- ======= VIEW: Export ======= -->
     <section id="view-export" class="view">
       <div class="export-container">
-        <h2>📊 Export to Excel</h2>
-        <p class="export-desc">Download all receipt records as an Excel spreadsheet.</p>
+        <h2>📊 Export to HQ</h2>
+        <p class="export-desc">Send receipt records as Excel straight to HQ WhatsApp.</p>
+        <div class="hq-badge">📱 HQ WhatsApp: <strong>+60 16-802 7076</strong></div>
 
         <div class="export-options">
           <div class="export-card" id="export-all">
-            <span class="export-icon">📥</span>
+            <span class="export-icon">📤</span>
             <div>
-              <strong>Export All Records</strong>
+              <strong>Send All Records</strong>
               <small>All receipts from the database</small>
             </div>
           </div>
           <div class="export-card" id="export-date-range">
             <span class="export-icon">📅</span>
             <div>
-              <strong>Export by Date Range</strong>
+              <strong>Send by Date Range</strong>
               <small>Pick start and end date</small>
             </div>
           </div>
           <div class="export-card" id="export-category">
             <span class="export-icon">🏷️</span>
             <div>
-              <strong>Export by Category</strong>
+              <strong>Send by Category</strong>
               <small>Filter by receipt category</small>
             </div>
           </div>
@@ -207,7 +208,7 @@
             <label>To Date</label>
             <input type="date" id="export-date-to" />
           </div>
-          <button id="btn-export-date-range" class="btn btn-primary">Download Excel</button>
+          <button id="btn-export-date-range" class="btn btn-primary">📤 Send to HQ</button>
         </div>
 
         <!-- Category Picker (hidden initially) -->
@@ -231,13 +232,13 @@
               <option value="other">📦 Other</option>
             </select>
           </div>
-          <button id="btn-export-category" class="btn btn-primary">Download Excel</button>
+          <button id="btn-export-category" class="btn btn-primary">📤 Send to HQ</button>
         </div>
 
         <!-- Export Result -->
         <div id="export-result" class="export-result hidden">
           <div id="export-success" class="alert alert-success hidden">
-            ✅ Excel file ready! Check your downloads.
+            ✅ Sent to HQ WhatsApp!
           </div>
           <div id="export-error" class="alert alert-error hidden">
             ❌ Export failed. Please try again.

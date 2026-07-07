@@ -1,5 +1,6 @@
 // ===== EXCEL EXPORT SERVICE (SheetJS) =====
 
+import { Capacitor } from '@capacitor/core';
 import * as XLSX from 'xlsx';
 import type { Receipt, ExportOptions } from './types';
 import { CATEGORIES } from './types';
@@ -146,4 +147,66 @@ export async function downloadExcel(blob: Blob, filename: string): Promise<void>
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+// ── HQ WhatsApp number (no +, international format) ──
+export const HQ_WHATSAPP = '60168027076';
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result as string;
+      resolve(result.split(',')[1]);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * Send the Excel export straight to WhatsApp (HQ).
+ * Priority:
+ *   1. Native Android plugin → opens WhatsApp with file attached (no picker)
+ *   2. Web Share API with file (mobile PWA → tap WhatsApp)
+ *   3. Download + open wa.me link (desktop)
+ * Returns true if WhatsApp was opened directly.
+ */
+export async function shareToWhatsApp(blob: Blob, filename: string): Promise<boolean> {
+  // 1. Native Android: direct to WhatsApp app (skips OS share sheet)
+  if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+    try {
+      const base64 = await blobToBase64(blob);
+      const plugin: any = (Capacitor as any).Plugins?.['ShareWhatsApp'];
+      if (plugin?.shareXlsx) {
+        await plugin.shareXlsx({ base64, fileName: filename, number: HQ_WHATSAPP });
+        return true;
+      }
+    } catch (e) {
+      console.warn('[WhatsApp] native share failed, falling back', e);
+    }
+  }
+
+  // 2. Web Share API with file (mobile PWA)
+  if (navigator.share && navigator.canShare) {
+    const file = new File([blob], filename, {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    if (navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: 'Branch Scanner Export' });
+        return true;
+      } catch {
+        /* user cancelled — fall through to download */
+      }
+    }
+  }
+
+  // 3. Fallback: download + open wa.me so user can attach manually
+  downloadExcel(blob, filename);
+  const waUrl = `https://wa.me/${HQ_WHATSAPP}?text=${encodeURIComponent(
+    `Branch Scanner export: ${filename} (saved to your Downloads folder)`
+  )}`;
+  window.open(waUrl, '_blank');
+  return false;
 }

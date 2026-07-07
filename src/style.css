@@ -441,6 +441,17 @@ body {
 
 .export-desc { font-size: 14px; color: var(--text-secondary); }
 
+.hq-badge {
+  background: rgba(201, 162, 39, 0.15);
+  border: 1px solid var(--gold);
+  color: var(--gold);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  margin-bottom: 16px;
+  text-align: center;
+}
+
 .export-options {
   display: flex;
   flex-direction: column;

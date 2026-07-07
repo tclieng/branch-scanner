@@ -5,7 +5,7 @@ import type { Receipt, ExportOptions } from './types';
 import { CATEGORIES } from './types';
 import * as db from './database';
 import { scanReceipt, initializeOCR } from './ocr';
-import { exportReceipts, downloadExcel } from './excel';
+import { exportReceipts, downloadExcel, shareToWhatsApp, HQ_WHATSAPP } from './excel';
 
 // ── State ──────────────────────────────────────────────────
 let currentImageDataUrl: string = '';
@@ -427,9 +427,9 @@ async function handleExport(mode: ExportOptions['mode']) {
     if (mode === 'date-range') filename = `BranchScanner_${options.dateFrom}_to_${options.dateTo}.xlsx`;
     if (mode === 'category') filename = `BranchScanner_${options.category}_${dateStr}.xlsx`;
 
-    await downloadExcel(blob, filename);
+    await shareToWhatsApp(blob, filename);
     successEl.classList.remove('hidden');
-    successEl.textContent = `✅ Exported! ${filename}`;
+    successEl.textContent = `✅ Sent to HQ WhatsApp (${HQ_WHATSAPP})! ${filename}`;
   } catch (err: any) {
     errorEl.classList.remove('hidden');
     errorEl.textContent = `❌ ${err.message || 'Export failed. Please try again.'}`;
