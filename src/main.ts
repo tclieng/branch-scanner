@@ -298,14 +298,14 @@ async function handleFormSubmit(e: Event) {
     }
     await db.addReceipt(receipt);
     showToast('Receipt saved successfully!', 'success');
-    resetScan();
-    await refreshReceiptList();
-    await updateStats();
-    showView('list');
+    try { resetScan(); } catch (e: any) { throw new Error(`resetScan: ${e.message}`); }
+    try { await refreshReceiptList(); } catch (e: any) { throw new Error(`refreshReceiptList: ${e.message}`); }
+    try { await updateStats(); } catch (e: any) { throw new Error(`updateStats: ${e.message}`); }
+    try { showView('list'); } catch (e: any) { throw new Error(`showView: ${e.message}`); }
   } catch (err: any) {
     console.error('[Save Error]', err);
     const msg = err?.message || err?.name || 'Unknown error';
-    showToast(`❌ Save failed: ${msg}`, 'error', 5000);
+    showToast(`❌ Save failed: ${msg}`, 'error', 6000);
   } finally {
     saveBtn.disabled = false;
     saveBtn.textContent = '💾 Save Receipt';
