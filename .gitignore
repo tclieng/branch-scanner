@@ -1,6 +1,5 @@
 node_modules/
 dist/
-android/
 .android/
 .gradle/
 .circumference/
@@ -12,3 +11,7 @@ android/
 .env.local
 .DS_Store
 *.log
+
+# Android build output (keep source files)
+android/app/build/
+android/.gradle/
