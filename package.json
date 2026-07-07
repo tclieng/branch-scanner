@@ -1,0 +1,28 @@
+{
+  "name": "branch-scanner",
+  "version": "1.0.0",
+  "description": "Branch Receipt Scanner - OCR receipt scanning for daily accounting",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "cap:sync": "npx cap sync android",
+    "cap:build": "npm run build && npx cap sync android"
+  },
+  "dependencies": {
+    "dexie": "^3.2.7",
+    "tesseract.js": "^5.1.1",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^6.2.0",
+    "@capacitor/cli": "^6.2.0",
+    "@capacitor/core": "^6.2.0",
+    "@capacitor/filesystem": "^6.0.1",
+    "@capacitor/share": "^6.0.1",
+    "@capacitor/status-bar": "^6.0.2",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.2"
+  }
+}

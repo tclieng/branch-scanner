@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#1a3d20" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Branch Scanner</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <!-- ======= App Shell ======= -->
+  <div id="app">
+    <!-- Header -->
+    <header class="app-header">
+      <h1>📊 Branch Scanner</h1>
+      <button id="btn-export" class="btn-export" title="Export to Excel">📥 Export</button>
+    </header>
+
+    <!-- Bottom Navigation -->
+    <nav class="bottom-nav">
+      <button class="nav-btn active" data-view="scan" id="nav-scan">
+        <span class="nav-icon">📷</span>
+        <span class="nav-label">Scan</span>
+      </button>
+      <button class="nav-btn" data-view="list" id="nav-list">
+        <span class="nav-icon">📋</span>
+        <span class="nav-label">Records</span>
+      </button>
+      <button class="nav-btn" data-view="export" id="nav-export">
+        <span class="nav-icon">📊</span>
+        <span class="nav-label">Export</span>
+      </button>
+    </nav>
+
+    <!-- ======= VIEW: Scan ======= -->
+    <section id="view-scan" class="view active">
+      <div class="scan-container">
+        <div id="camera-placeholder" class="camera-placeholder">
+          <div class="placeholder-content">
+            <span class="placeholder-icon">📷</span>
+            <p>Tap below to take a photo</p>
+            <small>Receipt will be scanned using OCR</small>
+          </div>
+        </div>
+        <div id="preview-container" class="preview-container hidden">
+          <img id="preview-image" src="" alt="Receipt preview" />
+          <div class="preview-overlay">
+            <button id="btn-retake" class="btn btn-secondary">🔄 Retake</button>
+          </div>
+        </div>
+
+        <!-- Capture Button -->
+        <div class="capture-bar">
+          <input type="file" id="file-input" accept="image/*" capture="environment" class="hidden" />
+          <button id="btn-capture" class="btn-capture">
+            <span>📷</span>
+          </button>
+        </div>
+
+        <!-- OCR Status -->
+        <div id="ocr-status" class="ocr-status hidden">
+          <div class="ocr-spinner"></div>
+          <span id="ocr-status-text">Scanning receipt...</span>
+          <div class="ocr-progress-bar"><div id="ocr-progress-fill"></div></div>
+        </div>
+
+        <!-- Receipt Form -->
+        <div id="receipt-form" class="receipt-form hidden">
+          <h2>📝 Receipt Details</h2>
+          <div id="ocr-confidence" class="confidence-badge hidden">
+            <span id="confidence-text"></span>
+          </div>
+          <form id="receipt-form-el">
+            <div class="form-group">
+              <label for="field-date">Date *</label>
+              <input type="date" id="field-date" required />
+            </div>
+            <div class="form-group">
+              <label for="field-supplier">Supplier / Vendor *</label>
+              <input type="text" id="field-supplier" placeholder="e.g. Shell Station" required />
+            </div>
+            <div class="form-group">
+              <label for="field-description">Description</label>
+              <input type="text" id="field-description" placeholder="e.g. Diesel - Vehicle ABC123" />
+            </div>
+            <div class="form-group">
+              <label for="field-amount">Amount (RM) *</label>
+              <input type="number" id="field-amount" step="0.01" min="0" placeholder="0.00" required />
+            </div>
+            <div class="form-group">
+              <label for="field-category">Category *</label>
+              <select id="field-category" required>
+                <option value="">-- Select Category --</option>
+                <option value="fuel">⛽ Fuel / Petrol</option>
+                <option value="food">🍔 Food & Beverages</option>
+                <option value="office">📎 Office Supplies</option>
+                <option value="utilities">💡 Utilities</option>
+                <option value="transport">🚗 Transport / Logistics</option>
+                <option value="maintenance">🔧 Maintenance / Repair</option>
+                <option value="salary">💰 Salary / Wages</option>
+                <option value="rental">🏠 Rental</option>
+                <option value="insurance">🛡️ Insurance</option>
+                <option value="marketing">📢 Marketing / Advertising</option>
+                <option value="telecom">📱 Telecommunications</option>
+                <option value="medical">🏥 Medical / Healthcare</option>
+                <option value="other">📦 Other</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="field-account">Account Code</label>
+              <input type="text" id="field-account" placeholder="e.g. 901-000" />
+            </div>
+            <div class="form-group">
+              <label for="field-notes">Notes</label>
+              <textarea id="field-notes" rows="2" placeholder="Additional notes..."></textarea>
+            </div>
+            <!-- Hidden image storage -->
+            <input type="hidden" id="field-image-data" />
+
+            <div class="form-actions">
+              <button type="button" id="btn-cancel-form" class="btn btn-secondary">Cancel</button>
+              <button type="submit" id="btn-save-receipt" class="btn btn-primary">💾 Save Receipt</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======= VIEW: Records List ======= -->
+    <section id="view-list" class="view">
+      <div class="list-toolbar">
+        <div class="search-bar">
+          <span>🔍</span>
+          <input type="text" id="search-input" placeholder="Search receipts..." />
+        </div>
+        <div class="filter-bar">
+          <select id="filter-category">
+            <option value="">All Categories</option>
+            <option value="fuel">⛽ Fuel</option>
+            <option value="food">🍔 Food</option>
+            <option value="office">📎 Office</option>
+            <option value="utilities">💡 Utilities</option>
+            <option value="transport">🚗 Transport</option>
+            <option value="maintenance">🔧 Maintenance</option>
+            <option value="salary">💰 Salary</option>
+            <option value="rental">🏠 Rental</option>
+            <option value="insurance">🛡️ Insurance</option>
+            <option value="marketing">📢 Marketing</option>
+            <option value="telecom">📱 Telecom</option>
+            <option value="medical">🏥 Medical</option>
+            <option value="other">📦 Other</option>
+          </select>
+        </div>
+      </div>
+      <div id="receipt-list" class="receipt-list">
+        <div class="empty-state" id="empty-list">
+          <span>📋</span>
+          <p>No receipts yet</p>
+          <small>Go to Scan tab to add your first receipt</small>
+        </div>
+      </div>
+      <div class="list-summary" id="list-summary">
+        <span id="summary-count">0 receipts</span>
+        <span id="summary-total">RM 0.00</span>
+      </div>
+    </section>
+
+    <!-- ======= VIEW: Export ======= -->
+    <section id="view-export" class="view">
+      <div class="export-container">
+        <h2>📊 Export to Excel</h2>
+        <p class="export-desc">Download all receipt records as an Excel spreadsheet.</p>
+
+        <div class="export-options">
+          <div class="export-card" id="export-all">
+            <span class="export-icon">📥</span>
+            <div>
+              <strong>Export All Records</strong>
+              <small>All receipts from the database</small>
+            </div>
+          </div>
+          <div class="export-card" id="export-date-range">
+            <span class="export-icon">📅</span>
+            <div>
+              <strong>Export by Date Range</strong>
+              <small>Pick start and end date</small>
+            </div>
+          </div>
+          <div class="export-card" id="export-category">
+            <span class="export-icon">🏷️</span>
+            <div>
+              <strong>Export by Category</strong>
+              <small>Filter by receipt category</small>
+            </div>
+          </div>
+        </div>
+
+        <!-- Date Range Picker (hidden initially) -->
+        <div id="date-range-panel" class="export-panel hidden">
+          <div class="form-group">
+            <label>From Date</label>
+            <input type="date" id="export-date-from" />
+          </div>
+          <div class="form-group">
+            <label>To Date</label>
+            <input type="date" id="export-date-to" />
+          </div>
+          <button id="btn-export-date-range" class="btn btn-primary">Download Excel</button>
+        </div>
+
+        <!-- Category Picker (hidden initially) -->
+        <div id="category-panel" class="export-panel hidden">
+          <div class="form-group">
+            <label>Category</label>
+            <select id="export-category-select">
+              <option value="">-- Select Category --</option>
+              <option value="fuel">⛽ Fuel / Petrol</option>
+              <option value="food">🍔 Food & Beverages</option>
+              <option value="office">📎 Office Supplies</option>
+              <option value="utilities">💡 Utilities</option>
+              <option value="transport">🚗 Transport / Logistics</option>
+              <option value="maintenance">🔧 Maintenance / Repair</option>
+              <option value="salary">💰 Salary / Wages</option>
+              <option value="rental">🏠 Rental</option>
+              <option value="insurance">🛡️ Insurance</option>
+              <option value="marketing">📢 Marketing / Advertising</option>
+              <option value="telecom">📱 Telecommunications</option>
+              <option value="medical">🏥 Medical / Healthcare</option>
+              <option value="other">📦 Other</option>
+            </select>
+          </div>
+          <button id="btn-export-category" class="btn btn-primary">Download Excel</button>
+        </div>
+
+        <!-- Export Result -->
+        <div id="export-result" class="export-result hidden">
+          <div id="export-success" class="alert alert-success hidden">
+            ✅ Excel file ready! Check your downloads.
+          </div>
+          <div id="export-error" class="alert alert-error hidden">
+            ❌ Export failed. Please try again.
+          </div>
+        </div>
+
+        <!-- Database Stats -->
+        <div class="db-stats">
+          <h3>📦 Database</h3>
+          <div class="stat-row">
+            <span>Total Receipts</span>
+            <strong id="stat-total">0</strong>
+          </div>
+          <div class="stat-row">
+            <span>Total Amount</span>
+            <strong id="stat-amount">RM 0.00</strong>
+          </div>
+          <div class="stat-row">
+            <span>Categories Used</span>
+            <strong id="stat-categories">0</strong>
+          </div>
+          <div class="stat-row">
+            <span>Storage Used</span>
+            <strong id="stat-storage">~0 KB</strong>
+          </div>
+          <button id="btn-clear-db" class="btn btn-danger">🗑️ Clear All Data</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======= Toast Notification ======= -->
+    <div id="toast" class="toast hidden"></div>
+
+    <!-- ======= Confirm Dialog ======= -->
+    <div id="confirm-dialog" class="dialog-overlay hidden">
+      <div class="dialog">
+        <p id="confirm-message">Are you sure?</p>
+        <div class="dialog-actions">
+          <button id="confirm-cancel" class="btn btn-secondary">Cancel</button>
+          <button id="confirm-ok" class="btn btn-danger">Confirm</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ======= Receipt Detail Modal ======= -->
+    <div id="receipt-modal" class="dialog-overlay hidden">
+      <div class="dialog receipt-modal-dialog">
+        <div class="modal-header">
+          <h3 id="modal-title">Receipt Detail</h3>
+          <button id="modal-close" class="modal-close">✕</button>
+        </div>
+        <div id="modal-body" class="modal-body"></div>
+        <div class="modal-actions">
+          <button id="modal-delete" class="btn btn-danger">🗑️ Delete</button>
+          <button id="modal-share" class="btn btn-secondary">📤 Share</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

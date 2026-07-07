@@ -1,0 +1,14 @@
+node_modules/
+dist/
+android/
+.android/
+.gradle/
+.circumference/
+*.apk
+*.aab
+*.keystore
+*.jks
+.env
+.env.local
+.DS_Store
+*.log
