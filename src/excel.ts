@@ -152,6 +152,9 @@ export async function downloadExcel(blob: Blob, filename: string): Promise<void>
 // ── HQ WhatsApp number (no +, international format) ──
 export const HQ_WHATSAPP = '60168027076';
 
+// ── HQ Gmail address ──
+export const HQ_GMAIL = 'hq@djgourmet.com.my';
+
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -208,5 +211,46 @@ export async function shareToWhatsApp(blob: Blob, filename: string): Promise<boo
     `Branch Scanner export: ${filename} (saved to your Downloads folder)`
   )}`;
   window.open(waUrl, '_blank');
+  return false;
+}
+
+/**
+ * Send the Excel export straight to HQ Gmail.
+ * Priority:
+ *   1. Native Android plugin → opens Gmail with file attached + pre-filled recipient/subject/body (no picker)
+ *   2. Web fallback: download file + open Gmail web compose URL (user attaches manually; browsers block mailto attachments)
+ * Returns true if Gmail was opened directly with the file attached.
+ */
+export async function shareToGmail(
+  blob: Blob,
+  filename: string,
+  info?: { email?: string; subject?: string; body?: string }
+): Promise<boolean> {
+  const email = info?.email || HQ_GMAIL;
+  const subject = info?.subject || 'Branch Scanner Report';
+  const body = info?.body || '';
+
+  // 1. Native Android: direct to Gmail app (skips OS share sheet)
+  if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+    try {
+      const base64 = await blobToBase64(blob);
+      const plugin: any = (Capacitor as any).Plugins?.['ShareGmail'];
+      if (plugin?.shareXlsx) {
+        await plugin.shareXlsx({ base64, fileName: filename, email, subject, body });
+        return true;
+      }
+    } catch (e) {
+      console.warn('[Gmail] native share failed, falling back', e);
+    }
+  }
+
+  // 2. Web fallback: download file + open Gmail web compose with pre-filled fields
+  downloadExcel(blob, filename);
+  const gmailUrl =
+    `https://mail.google.com/mail/?view=cm&fs=1` +
+    `&to=${encodeURIComponent(email)}` +
+    `&su=${encodeURIComponent(subject)}` +
+    `&body=${encodeURIComponent(body)}`;
+  window.open(gmailUrl, '_blank');
   return false;
 }

@@ -5,7 +5,7 @@ import type { Receipt, ExportOptions } from './types';
 import { CATEGORIES } from './types';
 import * as db from './database';
 import { scanReceipt, initializeOCR } from './ocr';
-import { exportReceipts, downloadExcel, shareToWhatsApp, HQ_WHATSAPP } from './excel';
+import { exportReceipts, shareToGmail, HQ_GMAIL } from './excel';
 import { compressImage, estimateSize } from './imageUtil';
 
 // ── State ──────────────────────────────────────────────────
@@ -436,9 +436,20 @@ async function handleExport(mode: ExportOptions['mode']) {
     if (mode === 'date-range') filename = `BranchScanner_${options.dateFrom}_to_${options.dateTo}.xlsx`;
     if (mode === 'category') filename = `BranchScanner_${options.category}_${dateStr}.xlsx`;
 
-    await shareToWhatsApp(blob, filename);
+    // Build auto-filled email subject + body
+    const dateLabel =
+      mode === 'date-range'
+        ? `${options.dateFrom} to ${options.dateTo}`
+        : mode === 'category'
+          ? (CATEGORIES[options.category!]?.label || options.category!)
+          : 'all records';
+    const subject = `Branch Scanner Report - ${new Date().toLocaleDateString('en-MY')}`;
+    const body =
+      `Hi HQ,\n\nBranch collection report for ${dateLabel} is attached.\n\nRegards,\nBranch Team`;
+
+    await shareToGmail(blob, filename, { email: HQ_GMAIL, subject, body });
     successEl.classList.remove('hidden');
-    successEl.textContent = `✅ Sent to HQ WhatsApp (${HQ_WHATSAPP})! ${filename}`;
+    successEl.textContent = `✅ Sent to HQ Gmail (${HQ_GMAIL})! ${filename}`;
   } catch (err: any) {
     errorEl.classList.remove('hidden');
     errorEl.textContent = `❌ ${err.message || 'Export failed. Please try again.'}`;
