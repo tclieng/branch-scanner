@@ -131,22 +131,30 @@ export async function downloadExcel(blob: Blob, filename: string): Promise<void>
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     });
     if (navigator.canShare({ files: [file] })) {
-      await navigator.share({
-        files: [file],
-        title: 'Branch Scanner Export',
-        text: `Receipt export from Branch Scanner (${new Date().toLocaleDateString('en-MY')})`,
-      });
-      URL.revokeObjectURL(url);
-      return;
+      try {
+        await navigator.share({
+          files: [file],
+          title: 'Branch Scanner Export',
+          text: `Receipt export from Branch Scanner (${new Date().toLocaleDateString('en-MY')})`,
+        });
+        return; // blob consumed by share
+      } catch {
+        // user cancelled — fall through to download
+      }
     }
   }
 
-  // Fallback: direct download
+  // Fallback: direct download.
+  // Anchor MUST be in the DOM and the object URL must stay alive until the
+  // browser has started reading the blob (revoking immediately cancels the
+  // download silently in Chrome).
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 // ── HQ WhatsApp number (no +, international format) ──
