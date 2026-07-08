@@ -447,9 +447,13 @@ async function handleExport(mode: ExportOptions['mode']) {
     const body =
       `Hi HQ,\n\nBranch collection report for ${dateLabel} is attached.\n\nRegards,\nBranch Team`;
 
-    await shareToGmail(blob, filename, { email: HQ_GMAIL, subject, body });
+    const attached = await shareToGmail(blob, filename, { email: HQ_GMAIL, subject, body });
     successEl.classList.remove('hidden');
-    successEl.textContent = `✅ Sent to HQ Gmail (${HQ_GMAIL})! ${filename}`;
+    if (attached) {
+      successEl.textContent = `✅ Gmail opened with ${filename} attached (${HQ_GMAIL})!`;
+    } else {
+      successEl.textContent = `📥 ${filename} downloaded — attach it to the Gmail window that just opened (${HQ_GMAIL})`;
+    }
   } catch (err: any) {
     errorEl.classList.remove('hidden');
     errorEl.textContent = `❌ ${err.message || 'Export failed. Please try again.'}`;

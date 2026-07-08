@@ -153,7 +153,7 @@ export async function downloadExcel(blob: Blob, filename: string): Promise<void>
 export const HQ_WHATSAPP = '60168027076';
 
 // ── HQ Gmail address ──
-export const HQ_GMAIL = 'hq@djgourmet.com.my';
+export const HQ_GMAIL = 'sbox2u@gmail.com';
 
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -244,7 +244,22 @@ export async function shareToGmail(
     }
   }
 
-  // 2. Web fallback: download file + open Gmail web compose with pre-filled fields
+  // 2. Mobile PWA: Web Share API attaches the file properly (native share sheet)
+  if (navigator.share && navigator.canShare) {
+    const file = new File([blob], filename, {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    if (navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: subject, text: body });
+        return true;
+      } catch {
+        /* user cancelled — fall through to download */
+      }
+    }
+  }
+
+  // 3. Desktop fallback: download file + open Gmail web compose (browser cannot auto-attach)
   downloadExcel(blob, filename);
   const gmailUrl =
     `https://mail.google.com/mail/?view=cm&fs=1` +
