@@ -1,7 +1,7 @@
 // ===== TESSERACT.JS OCR SERVICE =====
 
 import Tesseract, { createWorker, Worker } from 'tesseract.js';
-import type { OCRResult, LineItem } from './types';
+import type { OCRResult } from './types';
 
 let workerInstance: Worker | null = null;
 let isInitializing = false;
@@ -200,8 +200,8 @@ function parseReceiptText(text: string): OCRResult['parsed'] {
     }
   }
 
-  // ── Extract Line Items (for multi-page entry) ────────────
-  const lineItems: LineItem[] = [];
+  // ── Extract Line Items for description (all items in one field) ────────────
+  const lineItems: string[] = [];
   const excludeKeywords = /^(sub\s*total|subtotal|total|grand\s*total|tax|gst|sst|amount\s*due|cash\s*tendered|cash|card|change|paid|balance|net|payable|to\s*pay|round|item\s+\d|qty|saving)/i;
   const headerKeywords = /^(receipt|invoice|tax|tel|phone|address|date|bill|order|ref|no\.|welcome|thank|card|cash|change)/i;
 
@@ -220,39 +220,42 @@ function parseReceiptText(text: string): OCRResult['parsed'] {
     if (excludeKeywords.test(line)) continue;
     if (headerKeywords.test(line)) continue;
 
-    // Look ahead for qty × price pattern
-    for (let j = 1; j <= 2 && i + j < cleanLines.length; j++) {
+    // Look ahead up to 4 lines for qty × price pattern (Jaya Grocer has gaps)
+    for (let j = 1; j <= 4 && i + j < cleanLines.length; j++) {
       const next = cleanLines[i + j];
+      
+      // Skip barcode lines in between
+      if (isBarcode(next)) continue;
+      
+      // Pattern: 1 x 4.00 4.00 or 1x4.00 4.00
       const qtyPriceMatch = next.match(/(\d+)\s*[xX]\s*([\d,]+\.?\d*)\s+([\d,]+\.\d{2})/);
       if (qtyPriceMatch) {
-        const qty = parseInt(qtyPriceMatch[1], 10);
-        const unitPrice = parseFloat(qtyPriceMatch[2].replace(/,/g, ''));
         const lineTotal = parseFloat(qtyPriceMatch[3].replace(/,/g, ''));
         const cleaned = line.replace(/\s+/g, ' ').trim();
         if (cleaned.length > 0 && cleaned.length < 80) {
-          lineItems.push({ name: cleaned, quantity: qty, unitPrice, lineTotal });
+          lineItems.push(`${cleaned} (${lineTotal.toFixed(2)})`);
         }
         break;
       }
+      
       // Alternative: just price at end (restaurant style)
       const simplePriceMatch = next.match(/([\d,]+\.\d{2})\s*$/);
       if (simplePriceMatch && /\d+\s*[xX]/.test(next)) {
         const lineTotal = parseFloat(simplePriceMatch[1].replace(/,/g, ''));
         const cleaned = line.replace(/\s+/g, ' ').trim();
         if (cleaned.length > 0 && cleaned.length < 80) {
-          lineItems.push({ name: cleaned, lineTotal });
+          lineItems.push(`${cleaned} (${lineTotal.toFixed(2)})`);
         }
         break;
       }
     }
   }
 
-  // Generate receipt group ID for this scan
-  const receiptGroupId = `RCP-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-
-  // Build fallback description if no line items parsed
+  // Build description: all items joined with " | "
   let parsedDescription = '';
-  if (lineItems.length === 0 && totalLine) {
+  if (lineItems.length > 0) {
+    parsedDescription = lineItems.join(' | ');
+  } else if (totalLine) {
     parsedDescription = totalLine.slice(0, 80);
   }
 
@@ -260,9 +263,7 @@ function parseReceiptText(text: string): OCRResult['parsed'] {
     date: parsedDate,
     amount: parsedAmount,
     supplier: parsedSupplier,
-    description: parsedDescription,
-    lineItems: lineItems.length > 0 ? lineItems : undefined,
-    receiptGroupId
+    description: parsedDescription
   };
 }
 
