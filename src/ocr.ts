@@ -215,23 +215,55 @@ function parseReceiptText(text: string): OCRResult['parsed'] {
   }
 
   // ── Extract Description (collect line items) ─────────────
-  // Build a short description from line items (lines with prices) so the
-  // user can see what was purchased. Skip TOTAL / SUBTOTAL / tax lines.
+  // Build a short description from multi-line item blocks.
+  // Strategy: Look for a line that is followed (within 1-2 lines) by a
+  // "qty × price" pattern. This handles:
+  //   - Normal items: ItemName → 1x4.00 4.00
+  //   - Items with barcodes: ItemName → BARCODE UNIT → 1x12.50 12.50
+  //   - Restaurant items: ItemName → 1 x 8.50 8.50
+  // Skip header lines (tel, date, invoice), barcode lines (>65% digits),
+  // and total/tax lines.
   const lineItems: string[] = [];
-  const excludeKeywords = /^(sub\s*total|subtotal|total|grand\s*total|tax|gst|sst|amount\s*due|cash\s*tendered|cash|card|change|paid|balance|net|payable|to\s*pay|round)/i;
-  for (const line of cleanLines) {
+  const excludeKeywords = /^(sub\s*total|subtotal|total|grand\s*total|tax|gst|sst|amount\s*due|cash\s*tendered|cash|card|change|paid|balance|net|payable|to\s*pay|round|item\s+\d|qty|saving)/i;
+  const headerKeywords = /^(receipt|invoice|tax|tel|phone|address|date|bill|order|ref|no\.|welcome|thank|card|cash|change)/i;
+
+  // Skip lines where >65% of non-space chars are digits (barcodes, EAN codes)
+  const isBarcode = (s: string): boolean => {
+    const digits = (s.match(/\d/g) || []).length;
+    const total = s.replace(/\s/g, '').length;
+    return total > 0 && digits / total > 0.65;
+  };
+
+  for (let i = 0; i < cleanLines.length; i++) {
+    const line = cleanLines[i];
+    if (line.length < 3) continue;
     if (line === totalLine) continue;
-    if (excludeKeywords.test(line)) continue;
-    const hasPrice = /(?:^|\s)[\d,]+\.\d{2}\b/.test(line) || /RM\s*[\d,]+\.?\d*/i.test(line);
-    if (!hasPrice) continue;
-    const cleaned = line.replace(/\s+/g, ' ').trim();
-    if (cleaned.length > 0 && cleaned.length < 80) {
-      lineItems.push(cleaned);
+    if (!/[A-Za-z\s\-\'\.\&]/.test(line)) continue;   // must have letters/word chars
+    if (isBarcode(line)) continue;                         // skip barcode/UNIT lines
+    if (excludeKeywords.test(line)) continue;               // skip total/tax lines
+    if (headerKeywords.test(line)) continue;                // skip header lines
+
+    // Look ahead up to 2 lines for a qty × price pattern
+    let priceVal = '';
+    for (let j = 1; j <= 2 && i + j < cleanLines.length; j++) {
+      const next = cleanLines[i + j];
+      if (/\d+\s*[xX]\s*[\d,]+\.?\d*/.test(next)) {
+        const m = next.match(/([\d,]+\.\d{2})\s*$/);
+        if (m) { priceVal = m[1]; break; }
+      }
+    }
+
+    if (priceVal) {
+      const cleaned = line.replace(/\s+/g, ' ').trim();
+      if (cleaned.length > 0 && cleaned.length < 80) {
+        lineItems.push(`${cleaned} (${priceVal})`);
+      }
     }
   }
+
   let parsedDescription = '';
   if (lineItems.length > 0) {
-    parsedDescription = lineItems.slice(0, 4).join(' | ').slice(0, 200);
+    parsedDescription = lineItems.slice(0, 8).join(' | ').slice(0, 250);
   } else if (totalLine) {
     parsedDescription = totalLine.slice(0, 80);
   }
