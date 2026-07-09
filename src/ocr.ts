@@ -94,95 +94,167 @@ export async function scanReceipt(
 }
 
 function parseReceiptText(text: string): OCRResult['parsed'] {
-  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 2);
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  const cleanLines = lines.filter(l => l.length > 2);
 
   // ── Extract Date ─────────────────────────────────────────
-  // Pattern: DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD, DD.MM.YYYY
-  const datePatterns = [
-    /(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/,
-    /(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/,
-  ];
+  // Look for a labeled date first ("Date: 09/07/2026"), then any date in the
+  // top 10 lines. This avoids catching transaction IDs / phone numbers that
+  // happen to look like dates.
   let parsedDate: string | undefined;
-  for (const line of lines) {
-    for (const pattern of datePatterns) {
-      const m = line.match(pattern);
+  for (const line of cleanLines.slice(0, 10)) {
+    // Labeled: "Date: 09/07/26" or "Dated 09-07-2026"
+    const labeled = line.match(/(?:date|dated)\s*[:\-]?\s*(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/i);
+    if (labeled) {
+      parsedDate = normalizeDate(labeled[1]);
+      if (parsedDate) break;
+    }
+  }
+  if (!parsedDate) {
+    for (const line of cleanLines.slice(0, 10)) {
+      const m = line.match(/(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/);
       if (m) {
-        try {
-          let day: string, month: string, year: string;
-          if (m[3].length === 4) {
-            // YYYY-MM-DD format
-            [year, month, day] = [m[1], m[2], m[3]];
-          } else {
-            [day, month, year] = m[1][0] === '0' ? [m[1], m[2], m[3]] : [m[1], m[2], m[3]];
-            // Handle year as 2 digits
-            year = year.length === 2 ? `20${year}` : year;
-          }
-          month = month.padStart(2, '0');
-          day = day.padStart(2, '0');
-          const d = new Date(`${year}-${month}-${day}`);
-          if (!isNaN(d.getTime())) {
-            parsedDate = `${year}-${month}-${day}`;
-            break;
-          }
-        } catch (_) {}
+        parsedDate = normalizeDate(m[1]);
+        if (parsedDate) break;
       }
     }
-    if (parsedDate) break;
   }
 
-  // ── Extract Amount ───────────────────────────────────────
-  // Pattern: RM followed by number, or number ending with .00 / .XX
-  const amountPatterns = [
-    /RM\s*([\d,]+\.?\d*)/i,
-    /([\d,]+\.\d{2})/,
-    /([\d,]+\.00)/,
-  ];
+  // ── Extract Supplier ─────────────────────────────────────
+  // First non-trivial line in the header that looks like a business name.
+  let parsedSupplier: string | undefined;
+  const skipWords = ['receipt', 'invoice', 'tax', 'total', 'subtotal', 'gst', 'sst', 'rm',
+                     'cash', 'card', 'change', 'thank', 'welcome', 'address', 'tel', 'phone',
+                     'no.', 'no ', 'bill', 'order', 'ref'];
+  for (const line of cleanLines.slice(0, 5)) {
+    const lower = line.toLowerCase();
+    if (skipWords.some(w => lower.includes(w))) continue;
+    if (/^[\d\.\-\/\:\s]+$/.test(line)) continue;   // digits / separators only
+    if (line.length < 3) continue;
+    if (/^(total|amount|tax|sub|thank|welcome|change|cash|card|paid)/i.test(line)) continue;
+
+    parsedSupplier = line
+      .replace(/[^\w\s&\-\.\'@]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 60);
+    break;
+  }
+
+  // ── Extract Amount (TOTAL-aware, multi-line safe) ────────
+  // Strategy:
+  //   1. Look for a line containing TOTAL / GRAND TOTAL / AMOUNT DUE / NET TOTAL / PAYABLE
+  //   2. If a number sits on the same line, use it. Otherwise the next line.
+  //   3. Fall back to a line with explicit "RM" prefix.
+  //   4. Last resort: largest .XX number (typical total has 2 decimals).
   let parsedAmount: number | undefined;
-  let amountLine = '';
-  for (const line of lines) {
-    for (const pattern of amountPatterns) {
-      const m = line.match(pattern);
-      if (m) {
-        const raw = m[1].replace(/,/g, '');
-        const val = parseFloat(raw);
-        if (!isNaN(val) && val > 0 && val < 10000000) {
+  let totalLine = '';
+  const totalKeywords = /^(total|grand\s*total|net\s*total|net\s*amount|amount\s*due|amount\s*payable|amount|payable|to\s*pay|balance\s*due|final\s*total|due\s*amount)/i;
+
+  for (let i = cleanLines.length - 1; i >= 0; i--) {
+    const line = cleanLines[i];
+    if (!totalKeywords.test(line)) continue;
+
+    // Try same line
+    const same = line.match(/([\d,]+\.?\d*)/g);
+    if (same) {
+      for (const s of same.reverse()) {
+        const val = parseFloat(s.replace(/,/g, ''));
+        if (!isNaN(val) && val > 0) {
           parsedAmount = Math.round(val * 100) / 100;
-          amountLine = line;
+          totalLine = line;
           break;
         }
       }
     }
     if (parsedAmount !== undefined) break;
-  }
 
-  // ── Extract Supplier ─────────────────────────────────────
-  // First non-empty line that looks like a business name
-  let parsedSupplier: string | undefined;
-  const skipWords = ['receipt', 'invoice', 'tax', 'total', 'subtotal', 'gst', 'rm', 'date', 'time', 'cash', 'card', 'change', 'thank', 'welcome'];
-  for (const line of lines.slice(0, 5)) {
-    const lower = line.toLowerCase();
-    const looksLikeBusiness = !skipWords.some(w => lower.includes(w)) &&
-      line.length > 3 &&
-      !/^[\d\.\-\/\:]+$/.test(line) &&
-      !/^(total|amount|tax|sub|thank|welcome)/i.test(line);
-
-    if (looksLikeBusiness) {
-      // Clean up the business name
-      parsedSupplier = line
-        .replace(/[^\w\s&\-\.\'@]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .slice(0, 60);
-      break;
+    // Try next line (TOTAL often on its own line)
+    if (i + 1 < cleanLines.length) {
+      const next = cleanLines[i + 1];
+      const m = next.match(/([\d,]+\.?\d*)/);
+      if (m) {
+        const val = parseFloat(m[1].replace(/,/g, ''));
+        if (!isNaN(val) && val > 0) {
+          parsedAmount = Math.round(val * 100) / 100;
+          totalLine = next;
+          break;
+        }
+      }
     }
   }
 
-  // ── Extract Description ─────────────────────────────────
-  // Usually contains product/item keywords near the amount
+  // Fallback 1: explicit "RM" anywhere
+  if (parsedAmount === undefined) {
+    for (const line of cleanLines) {
+      const rm = line.match(/RM\s*([\d,]+\.?\d*)/i);
+      if (rm) {
+        const val = parseFloat(rm[1].replace(/,/g, ''));
+        if (!isNaN(val) && val > 0) {
+          parsedAmount = Math.round(val * 100) / 100;
+          totalLine = line;
+          break;
+        }
+      }
+    }
+  }
+
+  // Fallback 2: last .XX number on the receipt (typical total)
+  if (parsedAmount === undefined) {
+    for (let i = cleanLines.length - 1; i >= 0; i--) {
+      const m = cleanLines[i].match(/([\d,]+\.\d{2})\b/);
+      if (m) {
+        const val = parseFloat(m[1].replace(/,/g, ''));
+        if (!isNaN(val) && val > 0) {
+          parsedAmount = Math.round(val * 100) / 100;
+          totalLine = cleanLines[i];
+          break;
+        }
+      }
+    }
+  }
+
+  // ── Extract Description (collect line items) ─────────────
+  // Build a short description from line items (lines with prices) so the
+  // user can see what was purchased. Skip TOTAL / SUBTOTAL / tax lines.
+  const lineItems: string[] = [];
+  const excludeKeywords = /^(sub\s*total|subtotal|total|grand\s*total|tax|gst|sst|amount\s*due|cash\s*tendered|cash|card|change|paid|balance|net|payable|to\s*pay|round)/i;
+  for (const line of cleanLines) {
+    if (line === totalLine) continue;
+    if (excludeKeywords.test(line)) continue;
+    const hasPrice = /(?:^|\s)[\d,]+\.\d{2}\b/.test(line) || /RM\s*[\d,]+\.?\d*/i.test(line);
+    if (!hasPrice) continue;
+    const cleaned = line.replace(/\s+/g, ' ').trim();
+    if (cleaned.length > 0 && cleaned.length < 80) {
+      lineItems.push(cleaned);
+    }
+  }
   let parsedDescription = '';
-  if (amountLine && amountLine !== parsedSupplier) {
-    parsedDescription = amountLine.slice(0, 80);
+  if (lineItems.length > 0) {
+    parsedDescription = lineItems.slice(0, 4).join(' | ').slice(0, 200);
+  } else if (totalLine) {
+    parsedDescription = totalLine.slice(0, 80);
   }
 
   return { date: parsedDate, amount: parsedAmount, supplier: parsedSupplier, description: parsedDescription };
+}
+
+function normalizeDate(dateStr: string): string | undefined {
+  const m = dateStr.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
+  if (!m) return undefined;
+  let p1 = m[1], p2 = m[2], p3 = m[3];
+  // YYYY-MM-DD
+  if (p1.length === 4) {
+    return `${p1}-${p2.padStart(2, '0')}-${p3.padStart(2, '0')}`;
+  }
+  // DD/MM/YYYY (Malaysian convention)
+  let day = p1, month = p2, year = p3;
+  if (year.length === 2) year = `20${year}`;
+  if (parseInt(month, 10) > 12) {
+    // Looks like MM/DD/YYYY instead - swap
+    [day, month] = [month, day];
+  }
+  const d = new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`);
+  if (isNaN(d.getTime())) return undefined;
+  return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
 }
