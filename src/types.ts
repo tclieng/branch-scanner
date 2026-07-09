@@ -4,15 +4,34 @@ export interface Receipt {
   id?: number;                  // Auto-increment primary key
   date: string;                // ISO date string (YYYY-MM-DD)
   supplier: string;            // Supplier/vendor name
-  description: string;          // Receipt description
-  amount: number;              // Amount in RM
+  description: string;          // Receipt description (item name)
+  amount: number;              // Amount in RM (line item amount)
   category: string;            // Category key
   accountCode: string;         // Optional account code
   notes: string;               // Additional notes
   imageData?: string;         // Base64 image (optional)
   ocrConfidence?: number;      // OCR confidence 0-100
+  receiptGroupId?: string;     // Groups line items from same receipt scan
+  isTotalRow?: boolean;        // True if this is the summary/total row
   createdAt: number;           // Unix timestamp
   updatedAt: number;           // Unix timestamp
+}
+
+// Line item extracted from multi-line receipt
+export interface LineItem {
+  name: string;                // Item name/description
+  unitPrice?: number;          // Unit price (if available)
+  quantity?: number;           // Quantity (if available)
+  lineTotal: number;           // Line total amount
+}
+
+// Parsed result from multi-line receipt OCR
+export interface ParsedReceipt {
+  date?: string;
+  totalAmount?: number;        // Total from bottom of receipt
+  supplier?: string;
+  lineItems: LineItem[];       // Individual items
+  rawDescription?: string;     // Fallback single-line description
 }
 
 export interface OCRResult {
@@ -20,9 +39,11 @@ export interface OCRResult {
   confidence: number;
   parsed: {
     date?: string;
-    amount?: number;
+    amount?: number;           // Total amount (from bottom of receipt)
     supplier?: string;
-    description?: string;
+    description?: string;      // Legacy fallback
+    lineItems?: LineItem[];    // Multi-line items
+    receiptGroupId?: string;   // Generated group ID for this scan
   };
 }
 

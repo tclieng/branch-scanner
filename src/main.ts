@@ -14,6 +14,18 @@ let pendingReceiptId: number | null = null;
 let pendingDeleteId: number | null = null;
 let pendingDeleteFn: (() => Promise<void>) | null = null;
 
+// Multi-page entry state
+let multiPageState: {
+  lineItems: { name: string; lineTotal: number; quantity?: number; unitPrice?: number }[];
+  currentIndex: number;
+  sharedDate: string;
+  sharedSupplier: string;
+  sharedTotal: number;
+  sharedImageData: string;
+  receiptGroupId: string;
+  savedCount: number;
+} | null = null;
+
 // ── Initialize ─────────────────────────────────────────────
 async function init() {
   console.log('[BranchScanner] Starting up...');
@@ -69,6 +81,12 @@ function bindEvents() {
   // Form
   document.getElementById('receipt-form-el')?.addEventListener('submit', handleFormSubmit);
   document.getElementById('btn-cancel-form')?.addEventListener('click', resetScan);
+
+  // Multi-page form
+  document.getElementById('multi-page-form-el')?.addEventListener('submit', handleMultiPageSubmit);
+  document.getElementById('btn-mp-cancel')?.addEventListener('click', resetScan);
+  document.getElementById('btn-mp-skip')?.addEventListener('click', skipCurrentItem);
+  document.getElementById('btn-mp-finish')?.addEventListener('click', finishMultiPageEntry);
 
   // Receipt list
   document.getElementById('search-input')?.addEventListener('input', debounce(refreshReceiptList, 300));
@@ -166,9 +184,11 @@ function showPreview(dataUrl: string) {
 
 function resetScan() {
   currentImageDataUrl = '';
+  multiPageState = null;
   document.getElementById('camera-placeholder')?.classList.remove('hidden');
   document.getElementById('preview-container')?.classList.add('hidden');
   document.getElementById('receipt-form')?.classList.add('hidden');
+  document.getElementById('multi-page-form')?.classList.add('hidden');
   document.getElementById('ocr-status')?.classList.add('hidden');
   document.getElementById('ocr-progress-fill')!.style.width = '0%';
 }
@@ -210,8 +230,21 @@ async function runOCR(imageDataUrl: string) {
 }
 
 function populateForm(ocrResult: { rawText: string; confidence: number; parsed: any }, imageDataUrl: string) {
+  const hasLineItems = ocrResult.parsed.lineItems && ocrResult.parsed.lineItems.length > 1;
+
+  if (hasLineItems) {
+    // Multi-page entry mode
+    startMultiPageEntry(ocrResult, imageDataUrl);
+  } else {
+    // Single entry mode
+    populateSingleForm(ocrResult, imageDataUrl);
+  }
+}
+
+function populateSingleForm(ocrResult: { rawText: string; confidence: number; parsed: any }, imageDataUrl: string) {
   const form = document.getElementById('receipt-form')!;
   form.classList.remove('hidden');
+  document.getElementById('multi-page-form')?.classList.add('hidden');
 
   // Date
   const dateField = document.getElementById('field-date') as HTMLInputElement;
@@ -235,15 +268,23 @@ function populateForm(ocrResult: { rawText: string; confidence: number; parsed: 
   }
 
   // Description
-  (document.getElementById('field-description') as HTMLInputElement).value = ocrResult.parsed.description || '';
+  const desc = ocrResult.parsed.lineItems?.[0]?.name || ocrResult.parsed.description || '';
+  (document.getElementById('field-description') as HTMLInputElement).value = desc;
 
   // Store image data
   (document.getElementById('field-image-data') as HTMLInputElement).value = imageDataUrl;
 
   // Confidence badge
-  const confidenceEl = document.getElementById('ocr-confidence')!;
-  const confidenceTextEl = document.getElementById('confidence-text')!;
-  const conf = Math.round(ocrResult.confidence);
+  showConfidenceBadge('ocr-confidence', 'confidence-text', ocrResult.confidence);
+
+  // Scroll form into view
+  form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function showConfidenceBadge(badgeId: string, textId: string, confidence: number) {
+  const confidenceEl = document.getElementById(badgeId)!;
+  const confidenceTextEl = document.getElementById(textId)!;
+  const conf = Math.round(confidence);
   if (conf > 60) {
     confidenceEl.className = 'confidence-badge confidence-high';
     confidenceTextEl.textContent = `🟢 OCR Confidence: ${conf}%`;
@@ -255,11 +296,174 @@ function populateForm(ocrResult: { rawText: string; confidence: number; parsed: 
     confidenceTextEl.textContent = `🔴 OCR Confidence: ${conf}% — please verify`;
   } else {
     confidenceEl.className = 'hidden';
+    return;
   }
   confidenceEl.classList.remove('hidden');
+}
 
-  // Scroll form into view
-  form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+function startMultiPageEntry(ocrResult: { rawText: string; confidence: number; parsed: any }, imageDataUrl: string) {
+  const lineItems = ocrResult.parsed.lineItems || [];
+  const totalAmount = ocrResult.parsed.amount || 0;
+
+  // Initialize multi-page state
+  multiPageState = {
+    lineItems,
+    currentIndex: 0,
+    sharedDate: ocrResult.parsed.date || new Date().toISOString().slice(0, 10),
+    sharedSupplier: ocrResult.parsed.supplier || '',
+    sharedTotal: totalAmount,
+    sharedImageData: imageDataUrl,
+    receiptGroupId: ocrResult.parsed.receiptGroupId || `RCP-${Date.now()}`,
+    savedCount: 0
+  };
+
+  // Hide single form, show multi-page form
+  document.getElementById('receipt-form')?.classList.add('hidden');
+  const multiForm = document.getElementById('multi-page-form')!;
+  multiForm.classList.remove('hidden');
+
+  // Populate shared info
+  document.getElementById('shared-date')!.textContent = multiPageState.sharedDate;
+  document.getElementById('shared-supplier')!.textContent = multiPageState.sharedSupplier || 'Unknown';
+  document.getElementById('shared-total')!.textContent = `RM ${multiPageState.sharedTotal.toFixed(2)}`;
+
+  // Show confidence
+  showConfidenceBadge('multi-ocr-confidence', 'multi-confidence-text', ocrResult.confidence);
+
+  // Show first item
+  showCurrentMultiPageItem();
+
+  // Scroll into view
+  multiForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function showCurrentMultiPageItem() {
+  if (!multiPageState) return;
+
+  const { lineItems, currentIndex } = multiPageState;
+  const currentItem = lineItems[currentIndex];
+
+  // Update page indicator
+  document.getElementById('page-current')!.textContent = String(currentIndex + 1);
+  document.getElementById('page-total')!.textContent = String(lineItems.length);
+
+  // Populate form fields
+  (document.getElementById('mp-field-description') as HTMLInputElement).value = currentItem.name;
+  (document.getElementById('mp-field-amount') as HTMLInputElement).value = String(currentItem.lineTotal);
+  (document.getElementById('mp-field-category') as HTMLSelectElement).value = '';
+  (document.getElementById('mp-field-account') as HTMLInputElement).value = '';
+  (document.getElementById('mp-field-notes') as HTMLTextAreaElement).value = '';
+
+  // Hidden fields
+  (document.getElementById('mp-field-date') as HTMLInputElement).value = multiPageState.sharedDate;
+  (document.getElementById('mp-field-supplier') as HTMLInputElement).value = multiPageState.sharedSupplier;
+  (document.getElementById('mp-field-image-data') as HTMLInputElement).value = multiPageState.sharedImageData;
+  (document.getElementById('mp-field-receipt-group-id') as HTMLInputElement).value = multiPageState.receiptGroupId;
+
+  // Update buttons
+  const isLast = currentIndex === lineItems.length - 1;
+  const nextBtn = document.getElementById('btn-mp-next')!;
+  const finishBtn = document.getElementById('btn-mp-finish')!;
+  const skipBtn = document.getElementById('btn-mp-skip')!;
+
+  if (isLast) {
+    nextBtn.classList.add('hidden');
+    finishBtn.classList.remove('hidden');
+    skipBtn.classList.add('hidden');
+  } else {
+    nextBtn.classList.remove('hidden');
+    finishBtn.classList.add('hidden');
+    skipBtn.classList.remove('hidden');
+  }
+
+  // Focus on category (most likely to need selection)
+  (document.getElementById('mp-field-category') as HTMLSelectElement).focus();
+}
+
+async function handleMultiPageSubmit(e: Event) {
+  e.preventDefault();
+  if (!multiPageState) return;
+
+  const receipt: Omit<Receipt, 'id'> = {
+    date: (document.getElementById('mp-field-date') as HTMLInputElement).value,
+    supplier: (document.getElementById('mp-field-supplier') as HTMLInputElement).value.trim(),
+    description: (document.getElementById('mp-field-description') as HTMLInputElement).value.trim(),
+    amount: parseFloat((document.getElementById('mp-field-amount') as HTMLInputElement).value) || 0,
+    category: (document.getElementById('mp-field-category') as HTMLSelectElement).value,
+    accountCode: (document.getElementById('mp-field-account') as HTMLInputElement).value.trim(),
+    notes: (document.getElementById('mp-field-notes') as HTMLTextAreaElement).value.trim(),
+    imageData: (document.getElementById('mp-field-image-data') as HTMLInputElement).value || undefined,
+    receiptGroupId: (document.getElementById('mp-field-receipt-group-id') as HTMLInputElement).value,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+
+  if (!receipt.category) {
+    showToast('Please select a category', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('btn-mp-next') as HTMLButtonElement;
+  const finishBtn = document.getElementById('btn-mp-finish') as HTMLButtonElement;
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  finishBtn.disabled = true;
+  btn.textContent = 'Saving...';
+
+  try {
+    // Compress image before save
+    if (receipt.imageData && receipt.imageData.startsWith('data:image')) {
+      const { compressImage } = await import('./imageUtil');
+      receipt.imageData = await compressImage(receipt.imageData, 1024, 0.7);
+    }
+
+    await db.addReceipt(receipt);
+    multiPageState.savedCount++;
+    showToast(`Item ${multiPageState.currentIndex + 1} saved!`, 'success');
+
+    // Move to next item or finish
+    multiPageState.currentIndex++;
+    if (multiPageState.currentIndex < multiPageState.lineItems.length) {
+      showCurrentMultiPageItem();
+    } else {
+      // All done
+      finishMultiPageEntry();
+    }
+  } catch (err: any) {
+    console.error('[Save Error]', err);
+    showToast(`❌ Save failed: ${err.message}`, 'error', 6000);
+  } finally {
+    btn.disabled = false;
+    finishBtn.disabled = false;
+    btn.textContent = originalText;
+  }
+}
+
+function skipCurrentItem() {
+  if (!multiPageState) return;
+
+  multiPageState.currentIndex++;
+  if (multiPageState.currentIndex < multiPageState.lineItems.length) {
+    showToast(`Skipped item ${multiPageState.currentIndex}`, 'info');
+    showCurrentMultiPageItem();
+  } else {
+    finishMultiPageEntry();
+  }
+}
+
+async function finishMultiPageEntry() {
+  if (!multiPageState) return;
+
+  const saved = multiPageState.savedCount;
+  const total = multiPageState.lineItems.length;
+
+  showToast(`✅ Saved ${saved} of ${total} items!`, 'success', 4000);
+
+  multiPageState = null;
+  resetScan();
+  await refreshReceiptList();
+  await updateStats();
+  showView('list');
 }
 
 // ── Form Submission ─────────────────────────────────────────
@@ -337,12 +541,24 @@ async function refreshReceiptList() {
   document.getElementById('summary-count')!.textContent = `${receipts.length} receipt${receipts.length !== 1 ? 's' : ''}`;
   document.getElementById('summary-total')!.textContent = `RM ${total.toFixed(2)}`;
 
+  // Group receipts by receiptGroupId
+  const groupCounts = new Map<string, number>();
+  receipts.forEach(r => {
+    if (r.receiptGroupId) {
+      groupCounts.set(r.receiptGroupId, (groupCounts.get(r.receiptGroupId) || 0) + 1);
+    }
+  });
+
   listEl.innerHTML = receipts.map(r => {
     const catLabel = CATEGORIES[r.category]?.label.split(' ').slice(1).join(' ') || r.category;
+    const groupCount = r.receiptGroupId ? groupCounts.get(r.receiptGroupId) || 1 : 1;
+    const isGrouped = groupCount > 1;
+    const groupBadge = isGrouped ? `<span class="receipt-group-badge">📎 ${groupCount}</span>` : '';
+
     return `
-      <div class="receipt-card" data-id="${r.id}">
+      <div class="receipt-card ${isGrouped ? 'grouped' : ''}" data-id="${r.id}">
         <div class="receipt-card-header">
-          <span class="receipt-supplier">${escapeHtml(r.supplier)}</span>
+          <span class="receipt-supplier">${escapeHtml(r.supplier)}${groupBadge}</span>
           <span class="receipt-amount">RM ${r.amount.toFixed(2)}</span>
         </div>
         <div class="receipt-card-meta">
@@ -350,6 +566,7 @@ async function refreshReceiptList() {
           <span class="receipt-tag">${escapeHtml(catLabel)}</span>
           ${r.accountCode ? `<span class="receipt-account">A/C ${escapeHtml(r.accountCode)}</span>` : ''}
         </div>
+        ${r.description ? `<div class="receipt-desc" style="font-size:12px;color:#666;margin-top:4px;">${escapeHtml(r.description.slice(0, 40))}${r.description.length > 40 ? '...' : ''}</div>` : ''}
       </div>
     `;
   }).join('');
@@ -372,8 +589,25 @@ async function showReceiptModal(id: number) {
 
   document.getElementById('modal-title')!.textContent = `Receipt #${r.id}`;
   const body = document.getElementById('modal-body')!;
+
+  // Check if this is part of a group
+  let groupInfo = '';
+  if (r.receiptGroupId) {
+    const allReceipts = await db.getAllReceipts();
+    const groupItems = allReceipts.filter(x => x.receiptGroupId === r.receiptGroupId);
+    if (groupItems.length > 1) {
+      const groupTotal = groupItems.reduce((sum, x) => sum + x.amount, 0);
+      const thisIndex = groupItems.findIndex(x => x.id === r.id) + 1;
+      groupInfo = `<div class="modal-row" style="background:rgba(201,162,39,0.1);border-radius:6px;padding:8px 12px;margin-bottom:8px;">
+        <strong>📎 Group Item</strong>
+        <span>${thisIndex} of ${groupItems.length} (Total: RM ${groupTotal.toFixed(2)})</span>
+      </div>`;
+    }
+  }
+
   body.innerHTML = `
     ${r.imageData ? `<img src="${r.imageData}" class="modal-image" alt="Receipt" />` : ''}
+    ${groupInfo}
     <div class="modal-row"><strong>Date</strong><span>${formatDate(r.date)}</span></div>
     <div class="modal-row"><strong>Supplier</strong><span>${escapeHtml(r.supplier)}</span></div>
     <div class="modal-row"><strong>Amount</strong><span style="color:var(--primary);font-weight:800">RM ${r.amount.toFixed(2)}</span></div>
@@ -494,7 +728,7 @@ function hideConfirmDialog() {
 
 // ── Toast ───────────────────────────────────────────────────
 let toastTimer: ReturnType<typeof setTimeout>;
-function showToast(message: string, type: 'success' | 'error' = 'success', durationMs = 3000) {
+function showToast(message: string, type: 'success' | 'error' | 'info' = 'success', durationMs = 3000) {
   const toast = document.getElementById('toast')!;
   toast.textContent = message;
   toast.className = `toast ${type} show`;

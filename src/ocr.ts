@@ -1,7 +1,7 @@
 // ===== TESSERACT.JS OCR SERVICE =====
 
 import Tesseract, { createWorker, Worker } from 'tesseract.js';
-import type { OCRResult } from './types';
+import type { OCRResult, LineItem } from './types';
 
 let workerInstance: Worker | null = null;
 let isInitializing = false;
@@ -98,12 +98,8 @@ function parseReceiptText(text: string): OCRResult['parsed'] {
   const cleanLines = lines.filter(l => l.length > 2);
 
   // ── Extract Date ─────────────────────────────────────────
-  // Look for a labeled date first ("Date: 09/07/2026"), then any date in the
-  // top 10 lines. This avoids catching transaction IDs / phone numbers that
-  // happen to look like dates.
   let parsedDate: string | undefined;
-  for (const line of cleanLines.slice(0, 10)) {
-    // Labeled: "Date: 09/07/26" or "Dated 09-07-2026"
+  for (const line of cleanLines.slice(0, 15)) {
     const labeled = line.match(/(?:date|dated)\s*[:\-]?\s*(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/i);
     if (labeled) {
       parsedDate = normalizeDate(labeled[1]);
@@ -111,7 +107,7 @@ function parseReceiptText(text: string): OCRResult['parsed'] {
     }
   }
   if (!parsedDate) {
-    for (const line of cleanLines.slice(0, 10)) {
+    for (const line of cleanLines.slice(0, 15)) {
       const m = line.match(/(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/);
       if (m) {
         parsedDate = normalizeDate(m[1]);
@@ -121,7 +117,6 @@ function parseReceiptText(text: string): OCRResult['parsed'] {
   }
 
   // ── Extract Supplier ─────────────────────────────────────
-  // First non-trivial line in the header that looks like a business name.
   let parsedSupplier: string | undefined;
   const skipWords = ['receipt', 'invoice', 'tax', 'total', 'subtotal', 'gst', 'sst', 'rm',
                      'cash', 'card', 'change', 'thank', 'welcome', 'address', 'tel', 'phone',
@@ -129,7 +124,7 @@ function parseReceiptText(text: string): OCRResult['parsed'] {
   for (const line of cleanLines.slice(0, 5)) {
     const lower = line.toLowerCase();
     if (skipWords.some(w => lower.includes(w))) continue;
-    if (/^[\d\.\-\/\:\s]+$/.test(line)) continue;   // digits / separators only
+    if (/^[\d\.\-\/\:\s]+$/.test(line)) continue;
     if (line.length < 3) continue;
     if (/^(total|amount|tax|sub|thank|welcome|change|cash|card|paid)/i.test(line)) continue;
 
@@ -141,12 +136,7 @@ function parseReceiptText(text: string): OCRResult['parsed'] {
     break;
   }
 
-  // ── Extract Amount (TOTAL-aware, multi-line safe) ────────
-  // Strategy:
-  //   1. Look for a line containing TOTAL / GRAND TOTAL / AMOUNT DUE / NET TOTAL / PAYABLE
-  //   2. If a number sits on the same line, use it. Otherwise the next line.
-  //   3. Fall back to a line with explicit "RM" prefix.
-  //   4. Last resort: largest .XX number (typical total has 2 decimals).
+  // ── Extract TOTAL Amount (from bottom of receipt) ────────
   let parsedAmount: number | undefined;
   let totalLine = '';
   const totalKeywords = /^(total|grand\s*total|net\s*total|net\s*amount|amount\s*due|amount\s*payable|amount|payable|to\s*pay|balance\s*due|final\s*total|due\s*amount)/i;
@@ -155,7 +145,6 @@ function parseReceiptText(text: string): OCRResult['parsed'] {
     const line = cleanLines[i];
     if (!totalKeywords.test(line)) continue;
 
-    // Try same line
     const same = line.match(/([\d,]+\.?\d*)/g);
     if (same) {
       for (const s of same.reverse()) {
@@ -169,7 +158,6 @@ function parseReceiptText(text: string): OCRResult['parsed'] {
     }
     if (parsedAmount !== undefined) break;
 
-    // Try next line (TOTAL often on its own line)
     if (i + 1 < cleanLines.length) {
       const next = cleanLines[i + 1];
       const m = next.match(/([\d,]+\.?\d*)/);
@@ -184,7 +172,6 @@ function parseReceiptText(text: string): OCRResult['parsed'] {
     }
   }
 
-  // Fallback 1: explicit "RM" anywhere
   if (parsedAmount === undefined) {
     for (const line of cleanLines) {
       const rm = line.match(/RM\s*([\d,]+\.?\d*)/i);
@@ -199,7 +186,6 @@ function parseReceiptText(text: string): OCRResult['parsed'] {
     }
   }
 
-  // Fallback 2: last .XX number on the receipt (typical total)
   if (parsedAmount === undefined) {
     for (let i = cleanLines.length - 1; i >= 0; i--) {
       const m = cleanLines[i].match(/([\d,]+\.\d{2})\b/);
@@ -214,20 +200,11 @@ function parseReceiptText(text: string): OCRResult['parsed'] {
     }
   }
 
-  // ── Extract Description (collect line items) ─────────────
-  // Build a short description from multi-line item blocks.
-  // Strategy: Look for a line that is followed (within 1-2 lines) by a
-  // "qty × price" pattern. This handles:
-  //   - Normal items: ItemName → 1x4.00 4.00
-  //   - Items with barcodes: ItemName → BARCODE UNIT → 1x12.50 12.50
-  //   - Restaurant items: ItemName → 1 x 8.50 8.50
-  // Skip header lines (tel, date, invoice), barcode lines (>65% digits),
-  // and total/tax lines.
-  const lineItems: string[] = [];
+  // ── Extract Line Items (for multi-page entry) ────────────
+  const lineItems: LineItem[] = [];
   const excludeKeywords = /^(sub\s*total|subtotal|total|grand\s*total|tax|gst|sst|amount\s*due|cash\s*tendered|cash|card|change|paid|balance|net|payable|to\s*pay|round|item\s+\d|qty|saving)/i;
   const headerKeywords = /^(receipt|invoice|tax|tel|phone|address|date|bill|order|ref|no\.|welcome|thank|card|cash|change)/i;
 
-  // Skip lines where >65% of non-space chars are digits (barcodes, EAN codes)
   const isBarcode = (s: string): boolean => {
     const digits = (s.match(/\d/g) || []).length;
     const total = s.replace(/\s/g, '').length;
@@ -238,37 +215,55 @@ function parseReceiptText(text: string): OCRResult['parsed'] {
     const line = cleanLines[i];
     if (line.length < 3) continue;
     if (line === totalLine) continue;
-    if (!/[A-Za-z\s\-\'\.\&]/.test(line)) continue;   // must have letters/word chars
-    if (isBarcode(line)) continue;                         // skip barcode/UNIT lines
-    if (excludeKeywords.test(line)) continue;               // skip total/tax lines
-    if (headerKeywords.test(line)) continue;                // skip header lines
+    if (!/[A-Za-z\s\-\'\.\&]/.test(line)) continue;
+    if (isBarcode(line)) continue;
+    if (excludeKeywords.test(line)) continue;
+    if (headerKeywords.test(line)) continue;
 
-    // Look ahead up to 2 lines for a qty × price pattern
-    let priceVal = '';
+    // Look ahead for qty × price pattern
     for (let j = 1; j <= 2 && i + j < cleanLines.length; j++) {
       const next = cleanLines[i + j];
-      if (/\d+\s*[xX]\s*[\d,]+\.?\d*/.test(next)) {
-        const m = next.match(/([\d,]+\.\d{2})\s*$/);
-        if (m) { priceVal = m[1]; break; }
+      const qtyPriceMatch = next.match(/(\d+)\s*[xX]\s*([\d,]+\.?\d*)\s+([\d,]+\.\d{2})/);
+      if (qtyPriceMatch) {
+        const qty = parseInt(qtyPriceMatch[1], 10);
+        const unitPrice = parseFloat(qtyPriceMatch[2].replace(/,/g, ''));
+        const lineTotal = parseFloat(qtyPriceMatch[3].replace(/,/g, ''));
+        const cleaned = line.replace(/\s+/g, ' ').trim();
+        if (cleaned.length > 0 && cleaned.length < 80) {
+          lineItems.push({ name: cleaned, quantity: qty, unitPrice, lineTotal });
+        }
+        break;
       }
-    }
-
-    if (priceVal) {
-      const cleaned = line.replace(/\s+/g, ' ').trim();
-      if (cleaned.length > 0 && cleaned.length < 80) {
-        lineItems.push(`${cleaned} (${priceVal})`);
+      // Alternative: just price at end (restaurant style)
+      const simplePriceMatch = next.match(/([\d,]+\.\d{2})\s*$/);
+      if (simplePriceMatch && /\d+\s*[xX]/.test(next)) {
+        const lineTotal = parseFloat(simplePriceMatch[1].replace(/,/g, ''));
+        const cleaned = line.replace(/\s+/g, ' ').trim();
+        if (cleaned.length > 0 && cleaned.length < 80) {
+          lineItems.push({ name: cleaned, lineTotal });
+        }
+        break;
       }
     }
   }
 
+  // Generate receipt group ID for this scan
+  const receiptGroupId = `RCP-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+  // Build fallback description if no line items parsed
   let parsedDescription = '';
-  if (lineItems.length > 0) {
-    parsedDescription = lineItems.slice(0, 8).join(' | ').slice(0, 250);
-  } else if (totalLine) {
+  if (lineItems.length === 0 && totalLine) {
     parsedDescription = totalLine.slice(0, 80);
   }
 
-  return { date: parsedDate, amount: parsedAmount, supplier: parsedSupplier, description: parsedDescription };
+  return {
+    date: parsedDate,
+    amount: parsedAmount,
+    supplier: parsedSupplier,
+    description: parsedDescription,
+    lineItems: lineItems.length > 0 ? lineItems : undefined,
+    receiptGroupId
+  };
 }
 
 function normalizeDate(dateStr: string): string | undefined {

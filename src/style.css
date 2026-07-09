@@ -628,6 +628,7 @@ body {
 .toast.show { transform: translateX(-50%) translateY(0); }
 .toast.success { background: var(--success); }
 .toast.error { background: var(--danger); }
+.toast.info { background: #17a2b8; }
 
 /* ===== UTILITIES ===== */
 .hidden { display: none !important; }
@@ -636,3 +637,84 @@ body {
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 2px; }
+
+/* ===== MULTI-PAGE ENTRY FORM ===== */
+.multi-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.multi-page-header h2 {
+  font-size: 18px;
+  color: var(--primary);
+}
+
+.page-indicator {
+  background: var(--accent);
+  color: var(--primary);
+  padding: 4px 12px;
+  border-radius: 16px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.shared-receipt-info {
+  background: rgba(26, 61, 32, 0.08);
+  border: 1px solid rgba(26, 61, 32, 0.2);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shared-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+}
+
+.shared-label {
+  color: var(--text-secondary);
+}
+
+.shared-value {
+  font-weight: 600;
+  color: var(--primary);
+}
+
+#shared-total {
+  color: var(--accent);
+  font-size: 15px;
+}
+
+.multi-page-actions {
+  margin-top: 8px;
+}
+
+.multi-page-actions .btn-success {
+  background: var(--success);
+  color: white;
+}
+
+/* Receipt group indicator in list */
+.receipt-group-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--accent);
+  color: var(--primary);
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  margin-left: 6px;
+}
+
+.receipt-card.grouped {
+  border-left: 3px solid var(--accent);
+}
